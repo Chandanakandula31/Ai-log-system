@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const winston = require('winston');
 const { createClient } = require('@supabase/supabase-js');
@@ -14,88 +15,116 @@ const logger = winston.createLogger({
   ]
 });
 
-/* ---------------- SUPABASE ---------------- */
-const supabaseUrl = 'https://aotecjplcqwlupitibzg.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvdGVjanBsY3F3bHVwaXRpYnpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3MTM5NzgsImV4cCI6MjA4OTI4OTk3OH0.qJaPCak2e9yqa_kM9UqB1gSYc-lHv4_IE9rLw3u-Gio'; // ⚠️ Replace for safety
+/* ---------------- SUPABASE (ENV VARIABLES) ---------------- */
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("❌ Missing Supabase environment variables");
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+/* ---------------- HEALTH CHECK ---------------- */
+app.get('/', (req, res) => {
+  res.send('🚀 Server is running');
+});
 
 /* ---------------- ROUTE 1: GENERATE ERROR ---------------- */
 app.get('/error', async (req, res) => {
-  const errorLog = {
-    service_name: "payment-service",
-    error_message: "Database connection failed",
-    error_code: "ECONNREFUSED",
-    timestamp: new Date(),
-    status: "ERROR",
-    analyzed: false,
-    retry_count: 0
-  };
+  try {
+    const errorLog = {
+      service_name: "payment-service",
+      error_message: "Database connection failed",
+      error_code: "ECONNREFUSED",
+      timestamp: new Date(),
+      status: "ERROR",
+      analyzed: false,
+      retry_count: 0
+    };
 
-  // Log to file
-  logger.error(errorLog);
+    // Log to file
+    logger.error(errorLog);
 
-  // Store in Supabase
-  const { error } = await supabase
-    .from('projectlogs')
-    .insert([errorLog]);
+    // Store in Supabase
+    const { error } = await supabase
+      .from('projectlogs')
+      .insert([errorLog]);
 
-  if (error) {
-    return res.status(500).send(`Supabase insert error: ${error.message}`);
+    if (error) {
+      console.error("Supabase Error:", error.message);
+      return res.status(500).send(`Supabase insert error: ${error.message}`);
+    }
+
+    res.send("✅ Error logged to file and Supabase!");
+  } catch (err) {
+    console.error("Server Error:", err);
+    res.status(500).send("Internal Server Error");
   }
-
-  res.send("✅ Error logged to file and Supabase!");
 });
 
 /* ---------------- ROUTE 2: RETRY / RECOVERY ---------------- */
 app.post('/retry', async (req, res) => {
-  const { service, error, action } = req.body;
+  try {
+    const { service, error, action } = req.body;
 
-  console.log("🔄 Recovery triggered:");
-  console.log("Service:", service);
-  console.log("Error:", error);
-  console.log("Action:", action);
+    console.log("🔄 Recovery triggered:");
+    console.log("Service:", service);
+    console.log("Error:", error);
+    console.log("Action:", action);
 
-  // Simulate recovery logic
-  let recoveryStatus = "SUCCESS";
+    let recoveryStatus = "SUCCESS";
 
-  // Example logic (you can expand later)
-  if (action === "retry") {
-    console.log("Retrying operation...");
-  } else if (action === "restart-service") {
-    console.log("Restarting service...");
-  } else {
-    console.log("Unknown action, manual check required");
-    recoveryStatus = "FAILED";
+    // Flexible action handling
+    if (action && action.toLowerCase().includes("retry")) {
+      console.log("🔁 Retrying operation...");
+    } 
+    else if (action && action.toLowerCase().includes("restart")) {
+      console.log("🔄 Restarting service...");
+    } 
+    else {
+      console.log("⚠️ Unknown action, manual check required");
+      recoveryStatus = "FAILED";
+    }
+
+    res.json({
+      status: recoveryStatus,
+      message: "Recovery action executed",
+      service: service
+    });
+
+  } catch (err) {
+    console.error("Recovery Error:", err);
+    res.status(500).json({
+      status: "FAILED",
+      message: "Recovery failed due to server error"
+    });
   }
-
-  res.json({
-    status: recoveryStatus,
-    message: "Recovery action executed",
-    service: service
-  });
 });
 
-/* ---------------- ROUTE 3: GET LOGS (for dashboard later) ---------------- */
+/* ---------------- ROUTE 3: GET LOGS ---------------- */
 app.get('/logs', async (req, res) => {
-  const { data, error } = await supabase
-    .from('projectlogs')
-    .select('*')
-    .order('timestamp', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('projectlogs')
+      .select('*')
+      .order('timestamp', { ascending: false });
 
-  if (error) {
-    return res.status(500).send(error.message);
+    if (error) {
+      console.error("Fetch Error:", error.message);
+      return res.status(500).send(error.message);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("Server Error:", err);
+    res.status(500).send("Internal Server Error");
   }
-
-  res.json(data);
 });
 
-/* ---------------- START SERVER ---------------- */
-// app.listen(3000, () => {
-//   console.log("🚀 Server running on http://localhost:3000");
-// });
+/* ---------------- START SERVER (RAILWAY COMPATIBLE) ---------------- */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
- 
